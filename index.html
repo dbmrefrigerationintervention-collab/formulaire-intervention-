@@ -443,8 +443,8 @@
   // ---------- Supabase (hébergement multi-appareils) ----------
   // Renseignez ces deux valeurs après création de votre projet sur supabase.com
   // (Project Settings > API > Project URL / anon public key), puis redéployez.
-  const SUPABASE_URL = "https://bwqgddkmswkyfonlzpgq.supabase.co/rest/v1/";
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3cWdkZGttc3dreWZvbmx6cGdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4MDkxOTIsImV4cCI6MjEwNDM4NTE5Mn0.sT0zfQTO5a1qCHva8IckmCxfoT97V8hcW3sFXltgmHo";
+  const SUPABASE_URL = "VOTRE_SUPABASE_URL";
+  const SUPABASE_ANON_KEY = "VOTRE_SUPABASE_ANON_KEY";
 
   const sb = (window.supabase && SUPABASE_URL.startsWith('https://') && !SUPABASE_URL.includes('VOTRE_'))
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -758,7 +758,12 @@
           added++;
         }
       });
-      await storeSet('clients', clients, true);
+      const ok = await storeSet('clients', clients, true);
+      if(!ok){
+        statusEl.style.background = 'var(--danger-bg)'; statusEl.style.color = 'var(--danger)';
+        statusEl.innerHTML = `<span>⚠️</span><div>${added+updated} client(s) traité(s) mais l'enregistrement dans Supabase a échoué. Vérifiez que le script SQL a bien été exécuté (table kv_store) et ouvrez la console du navigateur (F12) pour voir le détail de l'erreur.</div>`;
+        return;
+      }
       statusEl.style.background = 'var(--ok-bg)'; statusEl.style.color = 'var(--ok)';
       statusEl.innerHTML = `<span>✅</span><div>${added} client(s) ajouté(s), ${updated} mis à jour${skipped?`, ${skipped} ligne(s) ignorée(s) (sans nom)`:''}.</div>`;
       renderClientResults($('clientSearch').value);
@@ -912,10 +917,16 @@
       clients.push(newClient);
       f.client.id = newClient.id;
     }
-    await storeSet('clients', clients, true);
+    const clientOk = await storeSet('clients', clients, true);
 
     fiches.unshift(f);
-    await storeSet('fiches', fiches, true);
+    const ficheOk = await storeSet('fiches', fiches, true);
+
+    if(!clientOk || !ficheOk){
+      toast('⚠️ Échec de synchronisation avec Supabase — vérifiez la configuration');
+      renderHistory();
+      return;
+    }
 
     renderHistory();
     toast('Fiche enregistrée ✓ (fiche client mise à jour)');
