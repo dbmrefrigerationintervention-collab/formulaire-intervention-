@@ -443,8 +443,8 @@
   // ---------- Supabase (hébergement multi-appareils) ----------
   // Renseignez ces deux valeurs après création de votre projet sur supabase.com
   // (Project Settings > API > Project URL / anon public key), puis redéployez.
-  const SUPABASE_URL = "VOTRE_SUPABASE_URL";
-  const SUPABASE_ANON_KEY = "VOTRE_SUPABASE_ANON_KEY";
+  const SUPABASE_URL = "https://bwqgddkmswkyfonlzpgq.supabase.co/rest/v1/";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3cWdkZGttc3dreWZvbmx6cGdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4MDkxOTIsImV4cCI6MjEwNDM4NTE5Mn0.sT0zfQTO5a1qCHva8IckmCxfoT97V8hcW3sFXltgmHo";
 
   const sb = (window.supabase && SUPABASE_URL.startsWith('https://') && !SUPABASE_URL.includes('VOTRE_'))
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
