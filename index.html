@@ -347,18 +347,16 @@
     <!-- Dépannage -->
     <div class="subform" id="subDepannage">
       <h3>Nature de l'intervention (sélection multiple)</h3>
-      <div class="chiplist" id="depannageChips">
-        <button type="button" class="chip" data-val="Recherche de fuite">Recherche de fuite</button>
-        <button type="button" class="chip" data-val="Réparation fuite">Réparation fuite</button>
-        <button type="button" class="chip" data-val="Ouverture du circuit">Ouverture du circuit</button>
-        <button type="button" class="chip" data-val="Rapatriement du gaz">Rapatriement du gaz</button>
-        <button type="button" class="chip" data-val="Test de pression Azote">Test de pression Azote</button>
-        <button type="button" class="chip" data-val="Tirage au vide">Tirage au vide</button>
-        <button type="button" class="chip" data-val="Recharge de gaz">Recharge de gaz</button>
-        <button type="button" class="chip" data-val="Dégivrage">Dégivrage</button>
-        <button type="button" class="chip" data-val="Vérification générale">Vérification générale</button>
+      <div class="chiplist" id="depannageChips"></div>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap;">
+        <button class="btn-ghost" id="btnAddIntervention" type="button">+ Ajouter une intervention</button>
+        <button class="btn-ghost" id="btnManageInterventions" type="button">✎ Modifier / supprimer</button>
       </div>
-      <button class="btn-ghost" id="btnAddIntervention" type="button" style="margin-top:8px;">+ Ajouter une intervention hors liste</button>
+      <div id="manageInterventionsPanel" style="display:none;margin-top:10px;">
+        <div id="manageInterventionsList"></div>
+        <button class="btn btn-outline" id="btnSaveManageInterventions" type="button" style="margin-top:8px;">Enregistrer les modifications</button>
+        <p class="hint" style="margin-top:6px;">Les modifications s'appliquent à toutes les fiches futures, pour tous les utilisateurs.</p>
+      </div>
       <div class="checkline" style="margin-top:12px;">
         <input type="checkbox" id="depRemplacement">
         <label for="depRemplacement" style="margin:0;font-weight:500;color:var(--ink);">Remplacement de pièce de rechange</label>
@@ -654,28 +652,82 @@
   });
 
   // depannage chips (multi-select)
-  document.querySelectorAll('#depannageChips .chip').forEach(c=>{
-    c.addEventListener('click', ()=> c.classList.toggle('on'));
-  });
-  function wireDepChip(c){
-    c.addEventListener('click', ()=> c.classList.toggle('on'));
+  function renderDepannageChips(){
+    const previouslyOn = new Set(Array.from(document.querySelectorAll('#depannageChips .chip.on')).map(c=>c.dataset.val));
+    const box = $('depannageChips');
+    box.innerHTML = '';
+    depannageActions.forEach(label=>{
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (previouslyOn.has(label) ? ' on' : '');
+      chip.dataset.val = label;
+      chip.textContent = label;
+      chip.addEventListener('click', ()=> chip.classList.toggle('on'));
+      box.appendChild(chip);
+    });
   }
   $('btnAddIntervention').addEventListener('click', async ()=>{
     const label = prompt('Nom de la nouvelle intervention :');
     if(!label || !label.trim()) return;
     const clean = label.trim();
-    const already = Array.from(document.querySelectorAll('#depannageChips .chip')).some(c=>c.dataset.val.toLowerCase()===clean.toLowerCase());
-    if(already){ toast('Cette intervention existe déjà'); return; }
-    const chip = document.createElement('button');
-    chip.type='button'; chip.className='chip on'; chip.dataset.val = clean; chip.textContent = clean;
-    wireDepChip(chip);
-    $('depannageChips').appendChild(chip);
+    if(depannageActions.some(a=>a.toLowerCase()===clean.toLowerCase())){ toast('Cette intervention existe déjà'); return; }
     depannageActions.push(clean);
-    await storeSet('depannage_actions', depannageActions, true);
+    const ok = await storeSet('depannage_actions', depannageActions, true);
+    if(!ok){ toast('⚠️ Échec de l\'enregistrement (Supabase)'); depannageActions.pop(); return; }
+    renderDepannageChips();
+    // sélectionne directement la nouvelle intervention ajoutée
+    const chips = document.querySelectorAll('#depannageChips .chip');
+    chips[chips.length-1].classList.add('on');
     toast('Intervention ajoutée à la liste');
   });
   $('depRemplacement').addEventListener('change', ()=>{
     $('depPieceField').style.display = $('depRemplacement').checked ? 'block' : 'none';
+  });
+
+  // ---------- gestion (modifier / supprimer) des interventions ----------
+  $('btnManageInterventions').addEventListener('click', ()=>{
+    const panel = $('manageInterventionsPanel');
+    const opening = panel.style.display === 'none';
+    panel.style.display = opening ? 'block' : 'none';
+    if(opening) renderManageInterventionsList();
+  });
+  function renderManageInterventionsList(){
+    const box = $('manageInterventionsList');
+    box.innerHTML = depannageActions.map((label,i)=>`
+      <div class="materiel-item" data-idx="${i}">
+        <input type="text" class="miLabel" value="${label.replace(/"/g,'&quot;')}">
+        <button type="button" class="miDelete" title="Supprimer">✕</button>
+      </div>`).join('');
+    box.querySelectorAll('.materiel-item').forEach(row=>{
+      row.querySelector('.miDelete').addEventListener('click', async ()=>{
+        const idx = Number(row.dataset.idx);
+        const removed = depannageActions[idx];
+        if(!confirm(`Supprimer « ${removed} » de la liste des interventions ?`)) return;
+        const backup = [...depannageActions];
+        depannageActions.splice(idx,1);
+        const ok = await storeSet('depannage_actions', depannageActions, true);
+        if(!ok){ toast('⚠️ Échec de la suppression (Supabase)'); depannageActions = backup; return; }
+        renderDepannageChips();
+        renderManageInterventionsList();
+        toast('Intervention supprimée');
+      });
+    });
+  }
+  $('btnSaveManageInterventions').addEventListener('click', async ()=>{
+    const rows = document.querySelectorAll('#manageInterventionsList .materiel-item');
+    const newList = [];
+    rows.forEach(row=>{
+      const val = row.querySelector('.miLabel').value.trim();
+      if(val) newList.push(val);
+    });
+    const deduped = [...new Set(newList)];
+    const backup = [...depannageActions];
+    depannageActions = deduped;
+    const ok = await storeSet('depannage_actions', depannageActions, true);
+    if(!ok){ toast('⚠️ Échec de l\'enregistrement (Supabase)'); depannageActions = backup; return; }
+    renderDepannageChips();
+    renderManageInterventionsList();
+    toast('Liste des interventions mise à jour');
   });
 
   // ---------- matériels ----------
@@ -1269,14 +1321,13 @@
       emailConfig = storedEmailConfig;
       $('cfgUrl').value = emailConfig.url||''; $('cfgSecret').value = emailConfig.secret||''; $('cfgArchive').value = emailConfig.archive||'';
     }
-    depannageActions = storedDepActions || [];
-    const extra = depannageActions.filter(a => !DEFAULT_DEPANNAGE_ACTIONS.includes(a));
-    extra.forEach(label=>{
-      const chip = document.createElement('button');
-      chip.type='button'; chip.className='chip'; chip.dataset.val = label; chip.textContent = label;
-      wireDepChip(chip);
-      $('depannageChips').appendChild(chip);
-    });
+    if(storedDepActions && storedDepActions.length){
+      depannageActions = storedDepActions;
+    } else {
+      depannageActions = [...DEFAULT_DEPANNAGE_ACTIONS];
+      await storeSet('depannage_actions', depannageActions, true);
+    }
+    renderDepannageChips();
     renderIntervenantSelect(lastIntervenant);
     renderSupIntervenantSelect();
     renderSupChips();
