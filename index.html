@@ -222,18 +222,37 @@
   <section class="card">
     <h2><span class="num">1</span>Intervenant</h2>
     <p class="hint">Le dernier intervenant choisi est proposé automatiquement.</p>
-    <div class="field">
+
+    <div class="checkline">
+      <input type="checkbox" id="fIntervenantExceptionnelToggle">
+      <label for="fIntervenantExceptionnelToggle" style="margin:0;font-weight:500;color:var(--ink);">Intervenant exceptionnel (non enregistré dans la liste des employés)</label>
+    </div>
+
+    <div class="field" id="fIntervenantEmployeWrap">
       <select id="fIntervenant"></select>
     </div>
-    <button class="btn-ghost" id="btnAddIntervenant" type="button">+ Ajouter un intervenant</button>
+    <div class="field" id="fIntervenantExceptionnelWrap" style="display:none;">
+      <input type="text" id="fIntervenantExceptionnel" placeholder="Nom de l'intervenant exceptionnel">
+    </div>
+
+    <div class="row" style="flex-wrap:wrap;">
+      <button class="btn-ghost" id="btnAddIntervenant" type="button">+ Ajouter un employé</button>
+      <button class="btn-ghost" id="btnManageIntervenants" type="button">✎ Gérer les employés</button>
+    </div>
+    <div id="manageIntervenantsPanel" style="display:none;margin-top:10px;">
+      <div id="manageIntervenantsList"></div>
+      <button class="btn btn-outline" id="btnSaveManageIntervenants" type="button" style="margin-top:8px;">Enregistrer les modifications</button>
+      <p class="hint" style="margin-top:6px;">Ces modifications s'appliquent à toute l'équipe.</p>
+    </div>
 
     <div class="field" style="margin-top:16px;">
       <label>Intervenants supplémentaires <span id="intervenantCountBadge" class="badge badge-warn" style="margin-left:4px;">1 au total</span></label>
-      <p class="hint" style="margin-top:2px;">Si plusieurs personnes sont intervenues sur ce site.</p>
+      <p class="hint" style="margin-top:2px;">Employés ou intervenants exceptionnels présents en plus, sur ce site.</p>
       <div class="chiplist" id="supIntervenantsChips"></div>
-      <div class="row" style="margin-top:8px;">
-        <select id="supIntervenantSelect" style="flex:1;"></select>
-        <button class="btn btn-outline" id="btnAddSupIntervenant" type="button" style="flex:none;">+ Ajouter</button>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap;">
+        <select id="supIntervenantSelect" style="flex:1;min-width:140px;"></select>
+        <button class="btn btn-outline" id="btnAddSupIntervenant" type="button" style="flex:none;">+ Ajouter l'employé</button>
+        <button class="btn-ghost" id="btnAddSupExceptionnel" type="button" style="flex:none;">+ Exceptionnel</button>
       </div>
     </div>
   </section>
@@ -363,6 +382,10 @@
       </div>
       <div class="field" id="depPieceField" style="display:none;">
         <label>Pièce remplacée</label><input type="text" id="depPieceTexte">
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label>Intervention exceptionnelle <span class="badge badge-warn">ponctuelle — non ajoutée à la liste</span></label>
+        <input type="text" id="depExceptionnelle" placeholder="Précisez si l'intervention ne figure dans aucune liste">
       </div>
     </div>
   </section>
@@ -544,47 +567,106 @@
   $('fHeureDebut').addEventListener('input', updateDuration);
   $('fHeureFin').addEventListener('input', updateDuration);
 
-  // ---------- intervenants ----------
+  // ---------- intervenants (employés fixes) ----------
   function renderIntervenantSelect(selected){
     const sel = $('fIntervenant');
-    sel.innerHTML = intervenants.map(n=>`<option value="${n}">${n}</option>`).join('') + `<option value="__autre__">Autre…</option>`;
+    sel.innerHTML = intervenants.map(n=>`<option value="${n}">${n}</option>`).join('');
     if(selected && intervenants.includes(selected)) sel.value = selected;
   }
   $('btnAddIntervenant').addEventListener('click', async ()=>{
-    const name = prompt('Nom du nouvel intervenant :');
+    const name = prompt('Nom du nouvel employé :');
     if(!name || !name.trim()) return;
     const clean = name.trim();
-    if(!intervenants.includes(clean)) intervenants.push(clean);
-    await storeSet('intervenants_list', intervenants, true);
+    if(intervenants.includes(clean)){ toast('Cet employé existe déjà'); return; }
+    intervenants.push(clean);
+    const ok = await storeSet('intervenants_list', intervenants, true);
+    if(!ok){ toast('⚠️ Échec de l\'enregistrement (Supabase)'); intervenants.pop(); return; }
     renderIntervenantSelect(clean);
+    renderSupIntervenantSelect();
     await storeSet('last_intervenant', clean, false);
-    toast('Intervenant ajouté');
+    toast('Employé ajouté');
   });
   $('fIntervenant').addEventListener('change', async (e)=>{
-    if(e.target.value === '__autre__'){
-      $('btnAddIntervenant').click();
-      return;
-    }
     await storeSet('last_intervenant', e.target.value, false);
     // évite d'avoir le même nom comme principal et comme supplémentaire
     const idx = supIntervenants.indexOf(e.target.value);
-    if(idx > -1){ supIntervenants.splice(idx,1); renderSupIntervenants(); }
+    if(idx > -1){ supIntervenants.splice(idx,1); supIntervenantsExceptionnel.delete(e.target.value); renderSupChips(); renderSupIntervenantSelect(); updateIntervenantCount(); }
   });
 
-  // ---------- intervenants supplémentaires ----------
+  // intervenant principal exceptionnel (ponctuel, jamais enregistré)
+  $('fIntervenantExceptionnelToggle').addEventListener('change', (e)=>{
+    const exceptionnel = e.target.checked;
+    $('fIntervenantEmployeWrap').style.display = exceptionnel ? 'none' : 'block';
+    $('fIntervenantExceptionnelWrap').style.display = exceptionnel ? 'block' : 'none';
+  });
+
+  // ---------- gestion (modifier / supprimer) des employés ----------
+  $('btnManageIntervenants').addEventListener('click', ()=>{
+    const panel = $('manageIntervenantsPanel');
+    const opening = panel.style.display === 'none';
+    panel.style.display = opening ? 'block' : 'none';
+    if(opening) renderManageIntervenantsList();
+  });
+  function renderManageIntervenantsList(){
+    const box = $('manageIntervenantsList');
+    box.innerHTML = intervenants.map((label,i)=>`
+      <div class="materiel-item" data-idx="${i}">
+        <input type="text" class="miLabel" value="${label.replace(/"/g,'&quot;')}">
+        <button type="button" class="miDelete" title="Supprimer">✕</button>
+      </div>`).join('');
+    box.querySelectorAll('.materiel-item').forEach(row=>{
+      row.querySelector('.miDelete').addEventListener('click', async ()=>{
+        const idx = Number(row.dataset.idx);
+        const removed = intervenants[idx];
+        if(!confirm(`Supprimer « ${removed} » de la liste des employés ?`)) return;
+        const backup = [...intervenants];
+        intervenants.splice(idx,1);
+        const ok = await storeSet('intervenants_list', intervenants, true);
+        if(!ok){ toast('⚠️ Échec de la suppression (Supabase)'); intervenants = backup; return; }
+        renderIntervenantSelect($('fIntervenant').value);
+        renderSupIntervenantSelect();
+        renderManageIntervenantsList();
+        toast('Employé supprimé');
+      });
+    });
+  }
+  $('btnSaveManageIntervenants').addEventListener('click', async ()=>{
+    const rows = document.querySelectorAll('#manageIntervenantsList .materiel-item');
+    const newList = [];
+    rows.forEach(row=>{
+      const val = row.querySelector('.miLabel').value.trim();
+      if(val) newList.push(val);
+    });
+    const deduped = [...new Set(newList)];
+    const backup = [...intervenants];
+    intervenants = deduped;
+    const ok = await storeSet('intervenants_list', intervenants, true);
+    if(!ok){ toast('⚠️ Échec de l\'enregistrement (Supabase)'); intervenants = backup; return; }
+    renderIntervenantSelect($('fIntervenant').value);
+    renderSupIntervenantSelect();
+    renderManageIntervenantsList();
+    toast('Liste des employés mise à jour');
+  });
+
+  // ---------- intervenants supplémentaires (employés ou exceptionnels) ----------
   let supIntervenants = [];
+  let supIntervenantsExceptionnel = new Set(); // sous-ensemble de supIntervenants marqués "exceptionnel"
   function renderSupIntervenantSelect(){
     const sel = $('supIntervenantSelect');
     const already = new Set([$('fIntervenant').value, ...supIntervenants]);
     const options = intervenants.filter(n => !already.has(n));
-    sel.innerHTML = options.map(n=>`<option value="${n}">${n}</option>`).join('') + `<option value="__autre__">Autre…</option>`;
+    sel.innerHTML = options.map(n=>`<option value="${n}">${n}</option>`).join('');
   }
   function renderSupChips(){
     const box = $('supIntervenantsChips');
-    box.innerHTML = supIntervenants.map(n=>`<span class="chip on" data-name="${n}">${n} <b style="cursor:pointer;">✕</b></span>`).join('');
+    box.innerHTML = supIntervenants.map(n=>{
+      const tag = supIntervenantsExceptionnel.has(n) ? ' <em style="font-style:normal;opacity:.7;">(exceptionnel)</em>' : '';
+      return `<span class="chip on" data-name="${n}">${n}${tag} <b style="cursor:pointer;">✕</b></span>`;
+    }).join('');
     box.querySelectorAll('.chip').forEach(el=>{
       el.querySelector('b').addEventListener('click', ()=>{
         supIntervenants = supIntervenants.filter(n=>n!==el.dataset.name);
+        supIntervenantsExceptionnel.delete(el.dataset.name);
         renderSupChips(); renderSupIntervenantSelect(); updateIntervenantCount();
       });
     });
@@ -593,21 +675,20 @@
     const total = 1 + supIntervenants.length;
     $('intervenantCountBadge').textContent = total > 1 ? `${total} au total` : `1 au total`;
   }
-  $('btnAddSupIntervenant').addEventListener('click', async ()=>{
+  $('btnAddSupIntervenant').addEventListener('click', ()=>{
     const sel = $('supIntervenantSelect');
-    let name = sel.value;
-    if(name === '__autre__'){
-      name = prompt('Nom de l\'intervenant supplémentaire :');
-      if(!name || !name.trim()) return;
-      name = name.trim();
-      if(!intervenants.includes(name)){
-        intervenants.push(name);
-        await storeSet('intervenants_list', intervenants, true);
-        renderIntervenantSelect($('fIntervenant').value);
-      }
-    }
-    if(!name || name === $('fIntervenant').value || supIntervenants.includes(name)) { renderSupIntervenantSelect(); return; }
+    const name = sel.value;
+    if(!name || name === $('fIntervenant').value || supIntervenants.includes(name)) return;
     supIntervenants.push(name);
+    renderSupChips(); renderSupIntervenantSelect(); updateIntervenantCount();
+  });
+  $('btnAddSupExceptionnel').addEventListener('click', ()=>{
+    const name = prompt('Nom de l\'intervenant exceptionnel (non enregistré) :');
+    if(!name || !name.trim()) return;
+    const clean = name.trim();
+    if(clean === $('fIntervenant').value || supIntervenants.includes(clean)){ toast('Déjà dans la liste'); return; }
+    supIntervenants.push(clean);
+    supIntervenantsExceptionnel.add(clean);
     renderSupChips(); renderSupIntervenantSelect(); updateIntervenantCount();
   });
 
@@ -941,8 +1022,9 @@
     return {
       id: 'f'+Date.now().toString(36),
       type: document.querySelector('#typeToggle button.active').dataset.val,
-      intervenant: $('fIntervenant').value,
-      intervenantsSupplementaires: [...supIntervenants],
+      intervenant: $('fIntervenantExceptionnelToggle').checked ? $('fIntervenantExceptionnel').value.trim() : $('fIntervenant').value,
+      intervenantExceptionnel: $('fIntervenantExceptionnelToggle').checked,
+      intervenantsSupplementaires: supIntervenants.map(n => ({ nom:n, exceptionnel: supIntervenantsExceptionnel.has(n) })),
       date: $('fDate').value,
       heureDebut: $('fHeureDebut').value,
       heureFin: $('fHeureFin').value,
@@ -964,7 +1046,7 @@
         modeleUE: $('iModeleUE').value, serieUE: $('iSerieUE').value, description: $('iDescription').value,
         modeleGen: $('iModeleGen').value, serieGen: $('iSerieGen').value
       },
-      depannage: { actions: depSelected, remplacement: $('depRemplacement').checked, piece: $('depPieceTexte').value },
+      depannage: { actions: depSelected, remplacement: $('depRemplacement').checked, piece: $('depPieceTexte').value, exceptionnelle: $('depExceptionnelle').value.trim() },
       materiel: materiel,
       signatures: { client: $('sigClient').dataset.signed==='1', intervenant: $('sigIntervenant').dataset.signed==='1' },
       envoiPapierRequis: !$('cEmail').value.trim(),
@@ -975,7 +1057,7 @@
   function ficheSummaryText(f){
     const lignes = [
       `FICHE D'INTERVENTION — ${f.type}`,
-      `Intervenant : ${f.intervenant}${f.intervenantsSupplementaires.length ? ' + ' + f.intervenantsSupplementaires.join(', ') + ` (${1+f.intervenantsSupplementaires.length} au total)` : ''}`,
+      `Intervenant : ${f.intervenant}${f.intervenantExceptionnel ? ' (exceptionnel — non enregistré)' : ''}${f.intervenantsSupplementaires.length ? ' + ' + f.intervenantsSupplementaires.map(i=>i.nom+(i.exceptionnel?' (exceptionnel)':'')).join(', ') + ` (${1+f.intervenantsSupplementaires.length} au total)` : ''}`,
       `Date : ${f.date}  |  ${f.heureDebut||'--:--'} → ${f.heureFin||'--:--'}  (${f.duree.replace('⏱ Durée : ','')})`,
       ``,
       `Client : ${f.client.nom} ${f.client.prenom} (${f.client.societe})`,
@@ -994,6 +1076,7 @@
       lignes.push(`Modèle équipement: ${f.installation.modeleGen}  N° Série: ${f.installation.serieGen}`);
     } else {
       lignes.push(`Actions : ${f.depannage.actions.join(', ') || '—'}`);
+      if(f.depannage.exceptionnelle) lignes.push(`Intervention exceptionnelle : ${f.depannage.exceptionnelle}`);
       if(f.depannage.remplacement) lignes.push(`Remplacement de pièce : ${f.depannage.piece}`);
     }
     if(f.materiel.length){
@@ -1190,7 +1273,7 @@
     y += 8;
 
     sectionTitle('Intervention');
-    line('Intervenant', f.intervenant + (f.intervenantsSupplementaires.length ? ` + ${f.intervenantsSupplementaires.join(', ')} (${1+f.intervenantsSupplementaires.length} au total)` : ''));
+    line('Intervenant', f.intervenant + (f.intervenantExceptionnel ? ' (exceptionnel)' : '') + (f.intervenantsSupplementaires.length ? ` + ${f.intervenantsSupplementaires.map(i=>i.nom+(i.exceptionnel?' (exc.)':'')).join(', ')} (${1+f.intervenantsSupplementaires.length} au total)` : ''));
     line('Date', f.date);
     line('Horaire', `${f.heureDebut||'--:--'} → ${f.heureFin||'--:--'}  (${f.duree.replace('⏱ Durée : ','')})`);
     y += 2;
@@ -1215,6 +1298,7 @@
       if(f.installation.description){ y+=1; paragraph(f.installation.description); }
     } else {
       line('Actions', f.depannage.actions.join(', ') || '—');
+      if(f.depannage.exceptionnelle) line('Intervention exceptionnelle', f.depannage.exceptionnelle);
       if(f.depannage.remplacement) line('Pièce remplacée', f.depannage.piece);
     }
     y += 2;
@@ -1270,7 +1354,9 @@
     $('fDate').valueAsDate = new Date(); $('fHeureDebut').value=''; $('fHeureFin').value=''; updateDuration();
     selectedClientId = null; $('clientFoundBanner').style.display='none';
     document.querySelectorAll('#materielList .materiel-item').forEach(r=>r.remove());
-    supIntervenants = []; renderSupChips(); renderSupIntervenantSelect(); updateIntervenantCount();
+    supIntervenants = []; supIntervenantsExceptionnel = new Set(); renderSupChips(); renderSupIntervenantSelect(); updateIntervenantCount();
+    $('fIntervenantExceptionnelToggle').checked = false;
+    $('fIntervenantEmployeWrap').style.display = 'block'; $('fIntervenantExceptionnelWrap').style.display = 'none';
     [$('sigClient'),$('sigIntervenant')].forEach(c=>{ c.getContext('2d').clearRect(0,0,c.width,c.height); c.dataset.signed=''; });
     refreshEmailWarning();
     toast('Fiche réinitialisée');
